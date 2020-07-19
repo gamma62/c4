@@ -6,7 +6,7 @@ REV = $(shell cat ../REV)
 CC = gcc
 
 CFLAGS = -g -O2 -W -Wall -Wshadow -Wpointer-arith -Wsign-compare \
-	-Wstrict-prototypes -I. -I..
+	-Wstrict-prototypes -I. -I.. -DLINUX
 
 all: libcalc4.so
 
@@ -38,23 +38,27 @@ install: libcalc4.so
 	ldconfig
 	install -d -m 755  $(DESTDIR)$(PREFIX)/include/
 	install -m 444 -p calc4.h  $(DESTDIR)$(PREFIX)/include/
-	@if test -f $(SHAREDIR)/md5sum ; then \
-	  echo $(SHAREDIR)/md5sum exists ; \
-	  if test -f $(SHAREDIR)/prim32.dat ; then \
-	    echo $(SHAREDIR)/prim32.dat exists ; \
-	  else \
-	    echo $(SHAREDIR)/prim32.dat does not exist ; \
-	  fi \
+	@if test -f prim32.dat ; then \
+	  install -d -m 755  $(SHAREDIR)/ ;\
+	  install -m 444 -p prim32.dat  $(SHAREDIR)/ ;\
 	else \
-	  echo $(SHAREDIR)/md5sum does not exist ; \
+	  if test -f $(SHAREDIR)/prim32.dat ; then \
+	    echo $(SHAREDIR)/prim32.dat exists ;\
+	  else \
+	    echo $(SHAREDIR)/prim32.dat does not exist ;\
+	  fi \
 	fi
 
 uninstall:
-	if test -f $(DESTDIR)$(PREFIX)/lib/libcalc4.so ; then \
+	@if test -f $(DESTDIR)$(PREFIX)/lib/libcalc4.so ; then \
 	  rm -f $(DESTDIR)$(PREFIX)/lib/libcalc4.so ;\
-	  ldconfig ;\
 	fi
-	if test -f $(DESTDIR)$(PREFIX)/include/calc4.h ; then \
+	@if test -f $(DESTDIR)$(PREFIX)/include/calc4.h ; then \
 	  rm -f $(DESTDIR)$(PREFIX)/include/calc4.h ;\
+	fi
+	@if test -f $(SHAREDIR)/prim32.dat ; then \
+	  echo $(SHAREDIR)/prim32.dat exists ;\
+	else \
+	  echo $(SHAREDIR)/prim32.dat does not exist ;\
 	fi
 

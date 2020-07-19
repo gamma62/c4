@@ -13,10 +13,15 @@
 
 #include <calc4.h>
 
+/* remove all white chars from string, everywhere
+*  do nothing if input is NULL, otherwise do the change inplace
+*/
 void strip_blanks(char *input_line)
 {
 	char *in=input_line, *out=input_line;
 
+	if (in == NULL)
+		return;
 	while (*in != '\0') {
 		if (*in == ' ' || *in == '\t' || *in == '\n' || *in == '\r') {
 			in++;
@@ -29,6 +34,19 @@ void strip_blanks(char *input_line)
 	return;
 }
 
+/* parse input into arrays: number [op number [op number ... [op number] ... ]]
+*  operators + - * / % and ( )
+*  numbers will be converted from hex, oct, s60, dec formats to decimal
+*  the substring between parenthesis will be evaluated with eval4() to number
+*  return <0 if something went wrong
+*  -1  parenthesis, but operator expected
+*  -2  number, but operator expected
+*  -4  operator, after operator
+*  -5  should be an operator, but is not
+*  -6  too many items
+*  -7  still waiting for number
+*  return otherwise the count of ops and arrays numbers[] operators[] are filled
+*/
 int input_parser(char *input_line, long long *numbers, char *operators)
 {
 	int k = 0;	/* count of operators */
@@ -40,18 +58,21 @@ int input_parser(char *input_line, long long *numbers, char *operators)
 	char number_buff[LINESIZE];
 	char *np = number_buff;
 
-	while (TRUE) {
+#define LPAREN   0x28
+#define RPAREN   0x29
 
+	while (TRUE)
+	{
 		if ((*buffp != '\0') && ( (in_depth > 0) ||
-		(*buffp == 0x28 && np == number_buff) ))
+		(*buffp == LPAREN && np == number_buff) ))
 		{
 			if (!next_is_number) {
-				return -1; //parenthesis, but operator expected
+				return -1; // parenthesis, but operator expected
 			}
 			in_paren = TRUE;
-			if (*buffp == 0x28) {
+			if (*buffp == LPAREN) {
 				in_depth++;
-			} else if (*buffp == 0x29) {
+			} else if (*buffp == RPAREN) {
 				in_depth--;
 			}
 			/* collect characters for embedded call */
@@ -61,7 +82,7 @@ int input_parser(char *input_line, long long *numbers, char *operators)
 		((*buffp == '-' || *buffp == '+') && np == number_buff) ))
 		{
 			if (!next_is_number) {
-				return -2; //number, but operator expected
+				return -2; // number, but operator expected
 			}
 			in_number = TRUE;
 			/* collect number characters */
@@ -73,10 +94,10 @@ int input_parser(char *input_line, long long *numbers, char *operators)
 				in_number = FALSE;
 				next_is_number = FALSE;
 				*np = '\0';
-				if (strchr(number_buff, ':') == NULL) {
-					numbers[k] = strtol(number_buff, (char **)NULL, 0);
-				} else {
+				if (strchr(number_buff, ':') != NULL) {
 					numbers[k] = s60_input(number_buff);
+				} else {
+					numbers[k] = strtol(number_buff, (char **)NULL, 0);
 				}
 				/* reset np */
 				np = number_buff;
@@ -124,6 +145,11 @@ int input_parser(char *input_line, long long *numbers, char *operators)
 	}
 }
 
+/* do calculator evaluation of input; must be stripped string
+*  calls input_parser() ... that is recursive if parenthesis detected
+*  error message to stderr and return 0 on errors
+*  otherwise return the arithmetic result of calculations
+*/
 long long eval4(char *input_line)
 {
 	/* numbers[0], operators[0], numbers[1], ..., numbers[k-1], operators[k-1], numbers[k] */
@@ -131,13 +157,13 @@ long long eval4(char *input_line)
 	long long numbers[KMAX+1];
 	char operators[KMAX];
 
-	if (*input_line == '\0')
+	if (input_line == NULL || *input_line == '\0')
 		return 0;
 
 	/* processing input_line into arrays */
 	k = input_parser(input_line, numbers, operators);
 	if (k < 0) {
-		fprintf(stderr, "parse error (%d)\n", k);
+		fprintf(stderr, "string parse error (%d)\n", k);
 		return 0;
 	}
 
@@ -150,13 +176,19 @@ long long eval4(char *input_line)
 	proc_add(&k, numbers, operators);
 
 	if (k != 0) {
-		fprintf(stderr, "processing failed (%d)\n", k);
+		fprintf(stderr, "aritmetic processing failed (%d)\n", k);
 		return 0;
 	}
 
 	return (numbers[k]);
 }
 
+/* do multiplications in the input series
+*  error message to stderr and return 0 on errors, otherwise
+*  return the arithmetic result of multiplicative calculations:
+*  number mult.op number --> number
+*  as long as mult.op fund in operators
+*/
 void proc_mult(int *kp, long long *numbers, char *operators)
 {
 	int i, j;
@@ -200,6 +232,12 @@ void proc_mult(int *kp, long long *numbers, char *operators)
 	return;
 }
 
+/* do additions in the input series
+*  error message to stderr and return 0 on errors, otherwise
+*  return the arithmetic result of additive calculations:
+*  number add.op number --> number
+*  as long as add.op fund in operators
+*/
 void proc_add(int *kp, long long *numbers, char *operators)
 {
 	long long number = 0;
@@ -233,12 +271,19 @@ void proc_add(int *kp, long long *numbers, char *operators)
 	return;
 }
 
+/* parse human readable time structure, months:days:hours:minutes:seconds
+*  all numbers are optional, even the last one, but one ':' is necessary
+*  return the number of seconds
+*/
 long s60_input(char *input_line)
 {
 	long number = 0L;
 	char *ptr;
 	long h=0, m=0, s=0, day=0, mon=0;
 	int len = strlen(input_line);
+
+	if (input_line == NULL || *input_line == '\0')
+		return 0;
 
 	ptr = input_line+len;
 	if (ptr > input_line) {
@@ -270,6 +315,15 @@ long s60_input(char *input_line)
 	return number;
 }
 
+/* load prime table from file to prim[] and set dim
+*  return 0 if succeeded
+*  error codes:
+*  1  prim[] already allocated
+*  2  open file failed
+*  3  fstat failed
+*  -1 malloc failed
+*  global variables used: unsigned prim[], int dim
+*/
 int c4_load_pt(int limit)
 {
 	char fname[LINESIZE];
@@ -278,6 +332,8 @@ int c4_load_pt(int limit)
 	struct stat statit;
 
 	if (prim != NULL) {
+		fprintf(stderr, "already loaded, dim %d, last %u\n",
+			dim, prim[dim-1]);
 		return 1;
 	}
 
@@ -322,14 +378,26 @@ int c4_load_pt(int limit)
 	return 0;
 }
 
+/* fill prime table with prime numbers, prim[] and dim
+*  simple algorithm, input blocked while running
+*  default limit is 10^6, maximum is 10^7, that takes almost a minute
+*  return 0 if succeeded
+*  error codes:
+*  1  prim[] already allocated
+*  -1 malloc failed
+*  global variables used: unsigned prim[], int dim
+*/
 int c4_fill_pt(int limit)
 {
 	int i, j, is_prime=0;
 	unsigned p, q;
 
 	if (prim != NULL) {
+		fprintf(stderr, "already loaded, dim %d, last %u\n",
+			dim, prim[dim-1]);
 		return 1;
 	}
+	if (limit > 10000000) limit = 10000000;
 	if (limit < 1) limit = 1000000;
 
 	prim = (unsigned *) malloc(limit*sizeof(unsigned));
@@ -343,9 +411,9 @@ int c4_fill_pt(int limit)
 	prim[1] = 3;
 	prim[2] = 5;
 	prim[3] = 7;
-	p = prim[i];
+	p = 9;
 
-	fprintf(stderr, "filling table ...\n");
+	fprintf(stderr, "filling table (limit %d) ...\n", limit);
 	for (i = 4; i < limit; p += 2) {
 		is_prime = 1;
 		q = (unsigned) sqrtl( (long double) p );
@@ -367,6 +435,14 @@ int c4_fill_pt(int limit)
 	return 0;
 }
 
+/* prime test with prim[] and dim,
+*  uses a hash alike algorithm in the range of prim[], and
+*  simple prime detection algorithm above it
+*  return 1 if the number is prime,
+*         0 if it is composite,
+*         -1 if test cannot decide due to prim[] limitation
+*  global variables used: unsigned prim[], int dim
+*/
 int c4_is_prim(unsigned long long n)
 {
 	int i=0, j=0, is_prime=1;
@@ -447,12 +523,20 @@ int c4_is_prim(unsigned long long n)
 			}
 		}
 
-		/* 64bit int : tested with all possible 32bit numbers -- if no divisor then this is a prime */
+		/* 64bit int n:
+		 * tested with all 32bit numbers
+		 * if no divisor found then this is a prime
+		 */
 	}
 
 	return is_prime;
 }
 
+/* return array of prime index and exponent pairs,
+*  array terminated with -1
+*  odd index: index in prim[], even index: exponent, ..., -1 
+*  global variables used: unsigned prim[], int dim
+*/
 int *c4_prim_fact(unsigned long long n)
 {
 	unsigned long long q;
@@ -504,6 +588,9 @@ int *c4_prim_fact(unsigned long long n)
 	return pf;
 }
 
+/* PI(n) is the number of prime numbers until n
+*  return an estimation
+*/
 unsigned long long c4_pi(unsigned long long n)
 {
 	long double x = n;
@@ -533,8 +620,8 @@ unsigned long long c4_lnko_historical(unsigned long long n, unsigned long long m
 	return n;
 }
 
-/* normal GCD, (a,b) -> d
- * loop based
+/* normal GCD, greatest common divisor, lnko(a, b)
+*  loop based
 */
 long long c4_lnko(long long a, long long b)
 {
@@ -551,8 +638,8 @@ long long c4_lnko(long long a, long long b)
 }
 
 /* extended GCD, (a,b) -> d with x, y
- * where d = (a,b) and d = a*x + b*y
- * recursive
+*  this is the extended algoritm for d = a*x + b*y
+*  recursive
 */
 long long c4_lnko3(long long a, long long b, long long *x, long long *y)
 {
@@ -583,6 +670,8 @@ long long c4_lnko3(long long a, long long b, long long *x, long long *y)
 	return d;
 }
 
+/* least common multiple, lkkt(n,m)
+*/
 unsigned long long c4_lkkt(unsigned long long n, unsigned long long m)
 {
 	long long lkkt = 1;
@@ -597,6 +686,13 @@ unsigned long long c4_lkkt(unsigned long long n, unsigned long long m)
 	return lkkt;
 }
 
+/* count of divisors of number n
+*  return 0 if cannot decide, limit reached
+*         1 if number is 1
+*         2 if number is prime
+*         >2 if number is composite
+*  uses c4_prim_fact()
+*/
 unsigned long long c4_cnt_div(unsigned long long n)
 {
 	int *ans=NULL;
@@ -637,6 +733,9 @@ unsigned long long c4_cnt_div(unsigned long long n)
 	return dn;
 }
 
+/* sum of divisors of number n
+*  uses c4_prim_fact()
+*/
 unsigned long long c4_sum_div(unsigned long long n)
 {
 	int *ans=NULL;
@@ -715,6 +814,8 @@ unsigned long long c4_sum_div(unsigned long long n)
 	return spd;
 }
 
+/* rapid calculation of base^power modulo modulus
+*/
 long long c4_rapid_exp(long long base, long long power, unsigned long long modulus)
 {
 	unsigned long long calc=0, xbase=0, bits=0;
@@ -725,7 +826,7 @@ long long c4_rapid_exp(long long base, long long power, unsigned long long modul
 
 	/* check potential overflow */
 	if (modulus > ULLONG_MAX/modulus)
-		return -1;
+		return -2;
 
 	/* calculate  calc = base^power  (modulo modulus) */
 	calc = 1;
@@ -739,9 +840,14 @@ long long c4_rapid_exp(long long base, long long power, unsigned long long modul
 			xbase = (xbase * xbase) % modulus;
 	}
 
-	return ((calc > LLONG_MAX) ? -1 : (long long)calc);
+	return ((calc > LLONG_MAX) ? -3 : (long long)calc);
 }
 
+/* run the Fermat test on number with witness
+*  return 0 if composite,
+*         1 if test passed, maybe a prime,
+*         -1 overflow
+*/
 int c4_fermat_test(unsigned long long n, long w)
 {
 	long long calc=0;
@@ -762,7 +868,7 @@ int c4_fermat_test(unsigned long long n, long w)
 	calc = c4_rapid_exp(w, n-1, n);
 
 	if (calc < 0) {
-		return -1; // overflow
+		return calc; // overflow
 	} else if ((calc % n) != 1) {
 		return 0; // composite number
 	} else {
@@ -770,6 +876,8 @@ int c4_fermat_test(unsigned long long n, long w)
 	}
 }
 
+/* return number of relative primes to n
+*/
 unsigned long long c4_phi(unsigned long long n)
 {
 	unsigned long long phi_of_n = n, p = 2;
@@ -796,6 +904,8 @@ unsigned long long c4_phi(unsigned long long n)
 	return phi_of_n;
 }
 
+/* test if n and m are relative prime numbers -- not implemented
+*/
 int c4_is_rel_prim(unsigned long long n, unsigned long long m)
 {
 	int has_cdiv = 0;

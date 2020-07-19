@@ -6,17 +6,20 @@ BINARY = c4
 REV = `cat ../REV`
 CC = cc
 
-CFLAGS = -g -O2 -W -Wall -fPIE -Wshadow -Wpointer-arith -Wsign-compare \
+CFLAGS = -Wall -Wextra -O2 -pipe -std=c99 -fstack-protector -fno-strict-aliasing \
+	-Wstack-protector -Wshadow -Wpointer-arith \
+	-Wformat -Wformat-security -Wsign-conversion -Wcast-qual -Wcast-align \
+	-Wwrite-strings -Wmissing-declarations -Wmissing-prototypes \
 	-Wno-strict-prototypes -I.. -I../lib -I/usr/local/include
 
-LDFLAGS = -fPIE -pie -rdynamic -L/usr/local/lib
+LDFLAGS = -L/usr/local/lib
 
 all: $(BINARY)
 
 # the new calculator, test version with local lib
 $(BINARY): $(BINARY).o ../lib/libcalc4.so
-	$(CC) -o $(BINARY) $(BINARY).o $(LDFLAGS) \
-		-lcalc4 -lm -lreadline
+	$(CC) -o $(BINARY) $(BINARY).o \
+		$(LDFLAGS) -lm -lreadline -Wl,-rpath -Wl,../lib -lcalc4
 	@echo $(BINARY) from rev.$(REV)
 
 clean:
@@ -25,7 +28,7 @@ clean:
 # install, recompile with the installed libcalc4.so
 install: $(BINARY).o
 	$(CC) -o $(BINARY) $(BINARY).o $(LDFLAGS) -L$(PREFIX)/lib \
-		-lcalc4 -lm -lreadline
+		-lm -lreadline -lcalc4
 	install -d -m 755 $(DESTDIR)$(PREFIX)/bin/
 	install -m 555 -p $(BINARY) $(DESTDIR)$(PREFIX)/bin/
 	@rm -f $(BINARY)

@@ -25,10 +25,10 @@
 void usage(char hex, char dec, char oct, char bin, char s60);
 void bin_output(long in_number);
 void s60_output(long in_number);
-void list_primes(long long from);
-void list_prim_factors(long long number);
-void run_base_fermat_test(long long number);
-void types(long long number);
+void list_some_primes(long long from);
+void list_prim_factors(unsigned long long number);
+void run_base_fermat_test(unsigned long long number);
+void types(unsigned long long number);
 
 unsigned *prim = NULL;
 int dim = 0;
@@ -38,6 +38,8 @@ int main(int argc, char *argv[])
 	int opt = 0;
 	char hex = 0, dec = 0, oct = 0, bin = 0, s60 = 0;
 	long long number = -1;
+	unsigned long long unumber = 1;
+	unsigned long long x = 1;
 	int r = 0;
 	long long d = 1;
 #ifdef _HAVE_READLINE
@@ -146,6 +148,8 @@ int main(int argc, char *argv[])
 			case 's':
 				s60 = (r>2 && linebuff[2] == '-') ? 0 : 1;
 				break;
+
+			/* load/unload prim[] table */
 			case 'u':
 				/* unload prime table */
 				if (prim != NULL) {
@@ -167,29 +171,29 @@ int main(int argc, char *argv[])
 					printf("load failed, %lld\n", d);
 				}
 				break;
+
+			/* regenerate prim[] table */
 			case 'f':
-				/* regenerate prim table */
-				number = 100*1000LL;
+				number = 0;
 				if (r>2) {
 					number = strtoll(linebuff+2, (char **)NULL, 0);
-					if (number < 0) number = 1000;
-					if (number > 1000000) number = 1000000;
 				}
 				d = c4_fill_pt(number);
 				if (d != 0) {
 					printf("fill failed, %lld\n", d);
 				}
 				break;
+
+			/* prime test with table */
 			case 'p':
-				/* prime test with table */
 				if (r>2) {
-					number = strtoll(linebuff+2, (char **)NULL, 0);
+					unumber = strtoull(linebuff+2, (char **)NULL, 0);
 					if (prim != NULL) {
-						d = c4_is_prim(number);
+						d = c4_is_prim(unumber);
 						if (d == 1) {
-							printf("%lld is prime\n", number);
+							printf("%llu is prime\n", unumber);
 						} else if (d == 0) {
-							printf("%lld is composite\n", number);
+							printf("%llu is composite\n", unumber);
 						} else {
 							printf("cannot decide (too large)\n");
 						}
@@ -198,20 +202,22 @@ int main(int argc, char *argv[])
 					}
 				}
 				break;
+
+			/* prime factor with table */
 			case 'P':
-				/* prime factor with table */
 				if (r>2) {
 					if (prim != NULL) {
-						number = strtoll(linebuff+2, (char **)NULL, 0);
-						list_prim_factors(number);
+						unumber = strtoull(linebuff+2, (char **)NULL, 0);
+						list_prim_factors(unumber);
 					} else {
 						printf("prim table not loaded\n");
 					}
 				}
 				break;
+
+			/* list primes in table by value or index */
 			case 'I':
 			case 'i':
-				/* list primes in table (number) by value or index */
 				if (r>2) {
 					number = strtoll(linebuff+2, (char **)NULL, 0);
 				} else {
@@ -219,8 +225,8 @@ int main(int argc, char *argv[])
 				}
 				if (prim != NULL) {
 					if (linebuff[1] == 'I') {
-						int i = c4_pi(number);
-						printf("PI(%lld)=%d   ", number, i);
+						int i = c4_pi((unsigned long long)number);
+						printf("PI(%llu)=%d   ", number, i);
 						if (i >= dim) {
 							printf("index above dim %d\n", dim);
 							i = dim-1;
@@ -239,26 +245,39 @@ int main(int argc, char *argv[])
 						printf("-> index: %d\n", i);
 						number = i;
 					}
-					list_primes(number);
+					list_some_primes(number);
 				} else {
 					printf("prim table not loaded\n");
 				}
 				break;
+
+			/* base Fermat prime test */
 			case 't':
-				/* base Fermat prime test */
 				if (r>2) {
-					number = strtoll(linebuff+2, (char **)NULL, 0);
-					run_base_fermat_test(number);
+					unumber = strtoull(linebuff+2, (char **)NULL, 0);
+					run_base_fermat_test(unumber);
 				}
 				break;
+
+			/* Euler's Totient function */
+			case 'T':
+				if (r>2) {
+					unumber = strtoull(linebuff+2, (char **)NULL, 0);
+					x = c4_phi(unumber);
+					printf("%llu -> %llu\n", unumber, x);
+				}
+				break;
+
+			/* the types */
 			case 'y':
 				if (r>2) {
-					number = strtoll(linebuff+2, (char **)NULL, 0);
+					unumber = strtoull(linebuff+2, (char **)NULL, 0);
 				} else {
-					number = 0;
+					unumber = 0;
 				}
-				types(number);
+				types(unumber);
 				break;
+
 			default:
 				break;
 			}
@@ -310,6 +329,7 @@ void usage(char hex, char dec, char oct, char bin, char s60)
 	printf("fill prime table: .f [<N>]\n");
 	printf("load prime table: .l [<N>]\n");
 	printf("unload prime table: .u\n");
+	printf("Totient function (phi): .T <N>\n");
 	printf("types: .y\n");
 	printf("quit: .q/q\n");
 }
@@ -388,7 +408,7 @@ void s60_output(long in_number)
 	return;
 }
 
-void list_primes(long long from)
+void list_some_primes(long long from)
 {
 	int j=0;
 
@@ -402,7 +422,7 @@ void list_primes(long long from)
 	return;
 }
 
-void list_prim_factors(long long number)
+void list_prim_factors(unsigned long long number)
 {
 	int *ans=NULL;
 	int i=0, q=0, u=0;
@@ -450,7 +470,7 @@ void list_prim_factors(long long number)
 	return;
 }
 
-void run_base_fermat_test(long long number)
+void run_base_fermat_test(unsigned long long number)
 {
 	long witness[] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31};
 	int ans=0;
@@ -470,24 +490,24 @@ void run_base_fermat_test(long long number)
 	}
 	printf("\n");
 
-	if (ans == -1) {
-		printf("overflow (number is too large for the test)\n");
+	if (ans < 0) {
+		printf("overflow\n");
 	} else if (ans == 0) {
-		printf("%lld is composite number\n", number);
+		printf("%lld is composite\n", number);
 	} else {
-		printf("maybe prime (all witnesses passed the Fermat test)\n");
+		printf("prime (probably)\n");
 	}
 
 	return;
 }
 
-void types(long long number)
+void types(unsigned long long number)
 {
 	printf("int sizeof %u, max %u\n", (unsigned)sizeof(int), INT_MAX);
 	printf("long sizeof %u, max %lu\n", (unsigned)sizeof(long), LONG_MAX);
 	printf("long long sizeof %u, max %llu\n", (unsigned)sizeof(long long), LLONG_MAX);
 	if (prim != NULL && number > 0 && number <= prim[dim-1]) {
-		printf("estimated PI(%lld) is %llu\n", number, c4_pi(number));
+		printf("estimated PI(%llu) is %llu\n", number, c4_pi(number));
 	}
 	return;
 }

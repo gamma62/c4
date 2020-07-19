@@ -1,4 +1,4 @@
-/* experimental new mill.c */
+/* mill.c on FreeBSD and Linux */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,15 +9,8 @@
 #include <unistd.h>
 #include <limits.h>
 #include <math.h>
-/////////////////////////////
+
 #include <pthread.h>
-#ifndef get_nprocs
-int get_nprocs(void) {
-	return 4;
-}
-#endif
-// #include <sys/sysinfo.h>
-/////////////////////////////
 
 /* prime table */
 unsigned *prim = NULL;
@@ -40,6 +33,121 @@ pthread_mutex_t out_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* save and load */
 const char *fname = "prim32.dat";
+
+#ifdef LINUX
+#include <sys/sysinfo.h>
+#include <sys/utsname.h>
+#else
+#include <sys/sysctl.h>
+#endif
+
+int get_system_info(void)
+{
+#ifdef LINUX
+//	unsigned int eax=11, ebx=0, ecx=1, edx=0;
+//	unsigned int ncores=0, nthreads=0;
+	struct utsname buffer;
+	char getbuff[4096];
+	int ncpu = 1;
+	char version[200];
+	char machine[200];
+	char model[200];
+	int byteorder = 0x1234;
+	version[0] = '\0';
+	machine[0] = '\0';
+	model[0] = '\0';
+
+	if (uname(&buffer) == 0) {
+		sprintf(version, "%s %s\n", buffer.sysname, buffer.release);
+		strncpy(machine, buffer.machine, sizeof(machine));
+	}
+
+	FILE *cpuinfo = fopen("/proc/cpuinfo", "r");
+	while (fgets (getbuff, 100, cpuinfo)) {
+		if (strncmp(getbuff, "model name	: ", 12) == 0) {
+			strncpy(model, getbuff+13, sizeof(model));
+			break;
+		}
+	}
+	fclose(cpuinfo);
+
+	ncpu = get_nprocs();
+
+	/* little endian or big endian? */
+	if ( ((*(char *)&byteorder) & 0x0f) == (byteorder & 0x0f) )
+		byteorder = 1234; //little endian (Intel)
+	else
+		byteorder = 4321; // big endian (Motorola)
+
+//Linux 5.4.0-37-generic
+	printf("%s", version);
+//Intel(R) Core(TM) i3-7130U CPU @ 2.70GHz
+	printf("%s", model);
+//4 CPUs, arch x86_64, byteorder 1234
+	printf("%d CPUs, arch %s, byteorder %d\n", ncpu, machine, byteorder);
+
+
+//	printf("This system has %d processors configured and %d processors available.\n",
+//		get_nprocs_conf(), get_nprocs());
+//
+//	asm volatile("cpuid" : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx) : "0" (eax), "2" (ecx) : );
+//	printf("Cores: %d Threads: %d Actual thread: %d\n",
+//		eax,
+//		ebx,
+//		edx);
+//
+//	asm volatile("cpuid": "=a" (ncores), "=b" (nthreads) : "a" (0xb), "c" (0x1) : );
+//	printf("Cores: %d Threads: %d with HyperThreading: %s\n",
+//		ncores,
+//		nthreads,
+//		(ncores!=nthreads) ? "Yes" : "No");
+
+	return ncpu;
+#else
+	int ncpu = 1;
+	int mib[2];
+	char version[200];
+	char machine[200];
+	char model[200];
+	int byteorder;
+	size_t len;
+
+	mib[0] = CTL_HW;
+	mib[1] = HW_NCPU;
+	len = sizeof(ncpu);
+	if (sysctl(mib, 2, &ncpu, &len, NULL, 0))
+		ncpu = 1;
+	mib[1] = HW_MODEL;
+	len = sizeof(model);
+	if (sysctl(mib, 2, model, &len, NULL, 0))
+		model[0] = '\0';
+	mib[1] = HW_MACHINE;
+	len = sizeof(machine);
+	if (sysctl(mib, 2, machine, &len, NULL, 0))
+		machine[0] = '\0';
+	mib[1] = HW_BYTEORDER;
+	len = sizeof(byteorder);
+	if (sysctl(mib, 2, &byteorder, &len, NULL, 0))
+		byteorder = 0;
+
+	mib[0] = CTL_KERN;
+	mib[1] = KERN_VERSION;
+	len = sizeof(version);
+	if (sysctl(mib, 2, version, &len, NULL, 0)) {
+		version[0] = '\n';
+		version[1] = '\0';
+	}
+
+//FreeBSD 12.0-RELEASE r341666 GENERIC
+	printf("%s", version);
+//Intel(R) Core(TM) i3-7130U CPU @ 2.70GHz
+	printf("%s\n", model);
+//4 CPUs, arch amd64, byteorder 1234
+	printf("%d CPUs, arch %s, byteorder %d\n", ncpu, machine, byteorder);
+
+	return ncpu;
+#endif
+}
 
 int is_prime_thread(unsigned long long n, int currentdim)
 {
@@ -137,6 +245,7 @@ int saveit(void)
 	size_t wr_size=0, wr_ctrl=0;
 	int fd=0;
 
+	printf("saving %d items to %s ...\n", dim, fname);
 	fd = open(fname, O_CREAT | O_WRONLY | O_TRUNC, 0644);
 	if (fd < 0) {
 		perror("open");
@@ -163,6 +272,7 @@ int fill_prim_table_main(void)
 {
 	int i, j;
 
+	printf("preparation...\n");
 	prim = (unsigned *) malloc(malloc_dim*sizeof(unsigned));
 	if (prim == NULL) {
 		perror("malloc prim");
@@ -189,18 +299,17 @@ int fill_prim_table_main(void)
 	dim = 4;
 	testnum = prim[dim-1] +2;
 
-	// init, one testnum in each loop
+	// init -- one testnum in each loop
 	while(testnum < 1000 || dim < 2*mult*npthread) {
 		if (is_prime_thread(testnum, dim)) {
 			prim[dim++] = testnum;
 		}
 		testnum += 2;
 	}
-	printf("init: dim %d, last prime %u, testnum %u\n", dim, prim[dim-1], testnum);
+	//printf("init done: dim %d, last prime %u, next testnum %u\n", dim, prim[dim-1], testnum);
 
+	printf("processing (mult=%d, npthread=%d) ...\n", mult, npthread);
 	if (npthread > 1) {
-		printf("config: mult=%d npthread=%d\n", mult, npthread);
-
 		// init testnumbers
 		for (i = 0; i < npthread; i++) {
 			for (j = 0; j < mult; j++) {
@@ -223,19 +332,14 @@ int fill_prim_table_main(void)
 		for(i=0; i < npthread; i++) {
 			pthread_join(pthreads[i], NULL);
 		}
-
 	} else {
-		printf("config: fallback\n");
+		// fallback
 		fill_prim_table_thread (NULL);
 	}
+	printf("processing finished: dim %d, last prime %u\n", dim, prim[dim-1]);
 
-	// save the result
-	printf("saving %d items... ", dim);
-	if (saveit()) {
-		printf("failed\n");
+	if (saveit())
 		return 1;
-	}
-	printf("ok\n");
 
 	return 0;
 }
@@ -245,41 +349,38 @@ int main(int argc, const char *argv[])
 	long double x = 1.0;
 	int ret = 0;
 
-	npthread = get_nprocs();
+	npthread = get_system_info(); // print system info
 	mult = 256;
+
+	if (argc == 1) {
+		printf("usage: %s <mult> [<npthread>]\n", argv[0]);
+		printf("    defaults: mult=%d npthread=%d\n", mult, npthread);
+		return 0;
+	}
+
 	last_testnum = UINT_MAX;
 	x = last_testnum;
 	//malloc_dim = (int) (1.07 * x / logl(x));
 	malloc_dim = (int) (x / (logl(x) - 1.5));
 	malloc_dim = ((malloc_dim/100)+1)*100;
-
-	if (argc == 1) {
-		printf("usage: %s <mult> [<npthread>]\n", argv[0]);
-		printf("  mult=%d npthread=%d\n", mult, npthread);
-		return 0;
-	}
+	//printf("last testnum %u, malloc dim %d\n", last_testnum, malloc_dim);
 
 	if (argc > 1) {
 		mult = atoi(argv[1]);
-		if (mult < 1) mult = 1;
 		if (argc > 2) {
 			npthread = atoi(argv[2]);
-			if (npthread < 1) npthread = 1;
 		}
 	}
+	if (mult < 1) mult = 1;
+	if (npthread < 1) npthread = 1;
 	// begin_task has 64bits
 	if (npthread > 62) npthread = 62;
 
-	printf("last %u, malloc %d, mult %d, npthread %d, run ...\n",
-		last_testnum, malloc_dim, mult, npthread);
-
-	if (argc > 3) return 0;
-
 	ret = fill_prim_table_main();
 	if (ret == 0)
-		printf("primes from 2 to %u, dim %d\n", prim[dim-1], dim);
+		printf("success\n");
 	else
-		printf("failed, last prime %u, dim %d\n", prim[dim-1], dim);
+		printf("failure\n");
 
 	free(testnumbers);
 	free(pthreads);
